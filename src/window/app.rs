@@ -15,12 +15,15 @@ use crate::core::config::{
 use crate::core::render::draw_island;
 use crate::utils::mouse::{get_global_cursor_pos, is_point_in_rect};
 use crate::utils::physics::Spring;
+use crate::utils::color::get_island_border_weights;
 
 pub struct App {
     window: Option<Arc<Window>>,
     surface: Option<Surface<Arc<Window>, Arc<Window>>>,
 
     expanded: bool,
+    border_weights: [f32; 4],
+    target_border_weights: [f32; 4],
     
     spring_w: Spring,
     spring_h: Spring,
@@ -31,6 +34,8 @@ pub struct App {
 
     win_x: i32,
     win_y: i32,
+
+    frame_count: u64,
 }
 
 impl Default for App {
@@ -39,6 +44,8 @@ impl Default for App {
             window: None,
             surface: None,
             expanded: false,
+            border_weights: [0.0; 4],
+            target_border_weights: [0.0; 4],
             spring_w: Spring::new(BASE_WIDTH),
             spring_h: Spring::new(BASE_HEIGHT),
             spring_r: Spring::new(13.5),
@@ -46,6 +53,7 @@ impl Default for App {
             os_h: 0,
             win_x: 0,
             win_y: 0,
+            frame_count: 0,
         }
     }
 }
@@ -103,9 +111,9 @@ impl ApplicationHandler for App {
                 button: MouseButton::Left,
                 ..
             } => {
-                let point = get_global_cursor_pos();
-                let rel_x = point.x - self.win_x;
-                let rel_y = point.y - self.win_y;
+                let (px, py) = get_global_cursor_pos();
+                let rel_x = px - self.win_x;
+                let rel_y = py - self.win_y;
                 
                 let island_y = PADDING as f64 / 2.0;
                 let offset_x = (self.os_w as f64 - self.spring_w.value as f64) / 2.0;
@@ -129,7 +137,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(surface) = self.surface.as_mut() {
-                    draw_island(surface, self.spring_w.value, self.spring_h.value, self.spring_r.value, self.os_w, self.os_h);
+                    draw_island(surface, self.spring_w.value, self.spring_h.value, self.spring_r.value, self.os_w, self.os_h, self.border_weights);
                 }
             }
             _ => (),
@@ -138,17 +146,36 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(window) = &self.window {
-            let point = get_global_cursor_pos();
-            
-            let rel_x = point.x - self.win_x;
-            let rel_y = point.y - self.win_y;
-            
+            let (px, py) = get_global_cursor_pos();
+            let rel_x = px - self.win_x;
+            let rel_y = py - self.win_y;
             let island_y = PADDING as f64 / 2.0;
             let offset_x = (self.os_w as f64 - self.spring_w.value as f64) / 2.0;
-            
             let is_hovering = is_point_in_rect(rel_x as f64, rel_y as f64, offset_x, island_y, self.spring_w.value as f64, self.spring_h.value as f64);
-                
             let _ = window.set_cursor_hittest(is_hovering);
+
+            if self.frame_count % 30 == 0 {
+                let island_cx = self.win_x + (self.os_w as i32 / 2);
+                let island_cy = self.win_y + (PADDING as i32 / 2) + (self.spring_h.value as i32 / 2);
+                let raw_weights = get_island_border_weights(island_cx, island_cy, self.spring_w.value, self.spring_h.value);
+                self.target_border_weights = raw_weights.map(|w| if w > 0.85 { w } else { 0.0 });
+            }
+            self.frame_count += 1;
+
+            let mut border_changed = false;
+            for i in 0..4 {
+                let diff = self.target_border_weights[i] - self.border_weights[i];
+                if diff.abs() > 0.005 {
+                    self.border_weights[i] += diff * 0.1;
+                    border_changed = true;
+                } else {
+                    self.border_weights[i] = self.target_border_weights[i];
+                }
+            }
+
+            if border_changed {
+                window.request_redraw();
+            }
 
             let target_w = if self.expanded { EXPANDED_WIDTH } else { BASE_WIDTH };
             let target_h = if self.expanded { EXPANDED_HEIGHT } else { BASE_HEIGHT };
