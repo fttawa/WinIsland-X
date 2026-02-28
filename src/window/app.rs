@@ -9,6 +9,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::platform::windows::WindowAttributesExtWindows;
 use winit::window::{Window, WindowId, WindowLevel};
 
+use windows::Win32::Foundation::POINT;
+use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
 use crate::core::config::{
     BASE_HEIGHT, BASE_WIDTH, EXPANDED_HEIGHT, EXPANDED_WIDTH, PADDING, TOP_OFFSET, WINDOW_TITLE,
 };
@@ -16,12 +19,15 @@ use crate::core::render::draw_island;
 use crate::utils::mouse::{get_global_cursor_pos, is_point_in_rect};
 use crate::utils::physics::Spring;
 use crate::utils::color::get_island_border_weights;
+use crate::window::tray::{TrayManager, TrayAction};
 
 pub struct App {
     window: Option<Arc<Window>>,
     surface: Option<Surface<Arc<Window>, Arc<Window>>>,
+    tray: Option<TrayManager>,
 
     expanded: bool,
+    visible: bool,
     border_weights: [f32; 4],
     target_border_weights: [f32; 4],
     
@@ -43,7 +49,9 @@ impl Default for App {
         Self {
             window: None,
             surface: None,
+            tray: None,
             expanded: false,
+            visible: true,
             border_weights: [0.0; 4],
             target_border_weights: [0.0; 4],
             spring_w: Spring::new(BASE_WIDTH),
@@ -99,6 +107,8 @@ impl ApplicationHandler for App {
                 .unwrap();
             self.surface = Some(surface);
             
+            self.tray = Some(TrayManager::new());
+            
             window.request_redraw();
         }
     }
@@ -144,8 +154,28 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(window) = &self.window {
+            if let Some(tray) = &self.tray {
+                if let Some(action) = tray.handle_events() {
+                    match action {
+                        TrayAction::ToggleVisibility => {
+                            self.visible = !self.visible;
+                            window.set_visible(self.visible);
+                            tray.update_item_text(self.visible);
+                        }
+                        TrayAction::Exit => {
+                            event_loop.exit();
+                        }
+                    }
+                }
+            }
+
+            if !self.visible {
+                std::thread::sleep(Duration::from_millis(16));
+                return;
+            }
+
             let (px, py) = get_global_cursor_pos();
             let rel_x = px - self.win_x;
             let rel_y = py - self.win_y;
