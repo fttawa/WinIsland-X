@@ -23,11 +23,13 @@ pub struct MusicApp {
     font_mgr: FontMgr,
     frame_count: u64,
     switch_pos: f32,
+    lyrics_switch_pos: f32,
     detected_apps: Vec<String>,
 }
 impl MusicApp {
     pub fn new(config: AppConfig) -> Self {
         let sp = if config.smtc_enabled { 1.0 } else { 0.0 };
+        let lsp = if config.show_lyrics { 1.0 } else { 0.0 };
         Self {
             window: None,
             surface: None,
@@ -36,6 +38,7 @@ impl MusicApp {
             font_mgr: FontMgr::new(),
             frame_count: 0,
             switch_pos: sp,
+            lyrics_switch_pos: lsp,
             detected_apps: Vec::new(),
         }
     }
@@ -82,19 +85,23 @@ impl MusicApp {
         paint.set_color(COLOR_TEXT_PRI);
         canvas.draw_str("Music Settings", (25.0, 45.0), &font_title, &paint);
         paint.set_color(COLOR_CARD);
-        canvas.draw_round_rect(Rect::from_xywh(20.0, 70.0, MUSIC_W - 40.0, 50.0), 12.0, 12.0, &paint);
+        canvas.draw_round_rect(Rect::from_xywh(20.0, 70.0, MUSIC_W - 40.0, 100.0), 12.0, 12.0, &paint);
         let font_item = self.get_font(15.0, false);
         paint.set_color(COLOR_TEXT_PRI);
         canvas.draw_str("SMTC Control", (40.0, 102.0), &font_item, &paint);
         self.draw_switch(canvas, 325.0, 82.0, self.switch_pos);
+        
+        canvas.draw_str("Show Lyrics", (40.0, 152.0), &font_item, &paint);
+        self.draw_switch(canvas, 325.0, 132.0, self.lyrics_switch_pos);
+
         let enabled = self.config.smtc_enabled;
         let text_color = if enabled { COLOR_TEXT_PRI } else { COLOR_TEXT_SEC };
         let sec_color = if enabled { COLOR_TEXT_SEC } else { COLOR_DISABLED };
         paint.set_color(sec_color);
         let font_sec = self.get_font(12.0, true);
-        canvas.draw_str("MEDIA APPLICATIONS", (30.0, 155.0), &font_sec, &paint);
-        self.draw_text_button(canvas, MUSIC_W - 130.0, 140.0, 110.0, 24.0, "Scan Apps", enabled);
-        let mut current_y = 170.0;
+        canvas.draw_str("MEDIA APPLICATIONS", (30.0, 205.0), &font_sec, &paint);
+        self.draw_text_button(canvas, MUSIC_W - 130.0, 190.0, 110.0, 24.0, "Scan Apps", enabled);
+        let mut current_y = 220.0;
         if self.detected_apps.is_empty() {
             paint.set_color(sec_color);
             canvas.draw_str("No sessions detected", (40.0, current_y + 25.0), &font_item, &paint);
@@ -155,12 +162,16 @@ impl MusicApp {
             self.config.smtc_enabled = !self.config.smtc_enabled;
             changed = true;
         }
+        if mx >= 320.0 && mx <= 380.0 && my >= 130.0 && my <= 160.0 {
+            self.config.show_lyrics = !self.config.show_lyrics;
+            changed = true;
+        }
         if self.config.smtc_enabled {
-            if mx >= MUSIC_W - 130.0 && mx <= MUSIC_W - 20.0 && my >= 140.0 && my <= 164.0 {
+            if mx >= MUSIC_W - 130.0 && mx <= MUSIC_W - 20.0 && my >= 190.0 && my <= 214.0 {
                 self.update_detected_apps();
                 if let Some(win) = &self.window { win.request_redraw(); }
             }
-            let mut current_y = 170.0;
+            let mut current_y = 220.0;
             let mut to_remove = None;
             for (i, app) in self.detected_apps.iter().enumerate() {
                 if mx >= 320.0 && mx <= 380.0 && my >= current_y && my <= current_y + 45.0 {
@@ -233,6 +244,11 @@ impl ApplicationHandler for MusicApp {
             let target = if self.config.smtc_enabled { 1.0 } else { 0.0 };
             if (target - self.switch_pos).abs() > 0.01 {
                 self.switch_pos += (target - self.switch_pos) * 0.2;
+                win_clone.request_redraw();
+            }
+            let l_target = if self.config.show_lyrics { 1.0 } else { 0.0 };
+            if (l_target - self.lyrics_switch_pos).abs() > 0.01 {
+                self.lyrics_switch_pos += (l_target - self.lyrics_switch_pos) * 0.2;
                 win_clone.request_redraw();
             }
             std::thread::sleep(Duration::from_millis(16));

@@ -44,6 +44,9 @@ pub struct App {
     last_media_title: String,
     last_media_playing: bool,
     last_playing_time: Instant,
+    current_lyric_text: String,
+    old_lyric_text: String,
+    lyric_transition: f32,
 }
 impl Default for App {
     fn default() -> Self {
@@ -74,6 +77,9 @@ impl Default for App {
             last_media_title: String::new(),
             last_media_playing: false,
             last_playing_time: Instant::now(),
+            current_lyric_text: String::new(),
+            old_lyric_text: String::new(),
+            lyric_transition: 1.0,
         }
     }
 }
@@ -211,9 +217,9 @@ impl ApplicationHandler for App {
                             } else {
                                 (0.0, 0.0)
                             };
-                            let total_w = (self.config.expanded_width - self.config.base_width).abs().max(1.0) * self.config.global_scale;
-                            let dist_w = (self.spring_w.value - self.config.base_width * self.config.global_scale).abs();
-                            let progress = (dist_w / total_w).clamp(0.0, 1.0);
+                            let total_h = (self.config.expanded_height - self.config.base_height).abs().max(1.0) * self.config.global_scale;
+                            let dist_h = (self.spring_h.value - self.config.base_height * self.config.global_scale).abs();
+                            let progress = (dist_h / total_h).clamp(0.0, 1.0);
                             let mut media_info = if self.config.smtc_enabled {
                                 self.smtc.get_info()
                             } else {
@@ -245,6 +251,10 @@ impl ApplicationHandler for App {
                                 self.config.global_scale,
                                 &self.tool_hovers,
                                 &self.tool_presses,
+                                &self.current_lyric_text,
+                                &self.old_lyric_text,
+                                self.lyric_transition,
+                                self.config.motion_blur,
                             );
                         }
                     }
@@ -359,8 +369,44 @@ impl ApplicationHandler for App {
                     window.request_redraw();
                 }
             }
+
+            let current_lyric_opt = if self.config.show_lyrics { media.current_lyric() } else { None };
+            if let Some(lyric) = current_lyric_opt {
+                if lyric != self.current_lyric_text {
+                    self.old_lyric_text = self.current_lyric_text.clone();
+                    self.current_lyric_text = lyric.clone();
+                    self.lyric_transition = 0.0;
+                }
+            } else if !self.current_lyric_text.is_empty() {
+                self.old_lyric_text = self.current_lyric_text.clone();
+                self.current_lyric_text = String::new();
+                self.lyric_transition = 0.0;
+            }
+
+            if self.lyric_transition < 1.0 {
+                self.lyric_transition += 0.05;
+                if self.lyric_transition > 1.0 {
+                    self.lyric_transition = 1.0;
+                }
+                window.request_redraw();
+            }
+
             let target_base_w = if music_active && !self.expanded {
-                self.config.base_width + 35.0 
+                if self.config.show_lyrics && !self.current_lyric_text.is_empty() {
+                    let mut text_w = 0.0;
+                    for c in self.current_lyric_text.chars() {
+                        if c.is_ascii() {
+                            text_w += 7.5;
+                        } else {
+                            text_w += 13.5;
+                        }
+                    }
+                    let min_w = self.config.base_width + 35.0;
+                    let w: f32 = 60.0 + text_w;
+                    w.clamp(min_w, 450.0)
+                } else {
+                    self.config.base_width + 35.0
+                }
             } else {
                 self.config.base_width
             };
@@ -406,9 +452,9 @@ impl ApplicationHandler for App {
                             if self.tool_presses[idx] < 0.0 { self.tool_presses[idx] = 0.0; }
                             window.request_redraw();
                         }
-                        }
-                        }
-                        }
+                    }
+                }
+            }
 
             if self.expanded || music_active || self.spring_w.velocity.abs() > 0.01 || self.spring_h.velocity.abs() > 0.01 {
                 window.request_redraw();

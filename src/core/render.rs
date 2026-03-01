@@ -7,9 +7,11 @@ use crate::core::config::PADDING;
 use crate::ui::expanded::main_view::{draw_main_page, get_media_palette, draw_visualizer, get_cached_media_image};
 use crate::ui::expanded::tools_view::draw_tools_page;
 use crate::core::smtc::MediaInfo;
+
 thread_local! {
     static SK_SURFACE: RefCell<Option<SkSurface>> = RefCell::new(None);
 }
+
 pub fn draw_island(
     surface: &mut Surface<Arc<Window>, Arc<Window>>,
     current_w: f32,
@@ -26,6 +28,10 @@ pub fn draw_island(
     global_scale: f32,
     tool_hovers: &[f32; 15],
     tool_presses: &[f32; 15],
+    current_lyric: &str,
+    old_lyric: &str,
+    lyric_transition: f32,
+    use_blur: bool,
 ) {
     let mut buffer = surface.buffer_mut().unwrap();
     let mut sk_surface = SK_SURFACE.with(|cell| {
@@ -108,9 +114,86 @@ pub fn draw_island(
             &palette,
             &media.spectrum,
             0.55 * global_scale,
-            0.08 * global_scale,
+            0.45 * global_scale,
             (0.3, 0.05)
         );
+
+        if !current_lyric.is_empty() || !old_lyric.is_empty() {
+            let space_left = offset_x + 30.0 * global_scale;
+            let space_right = offset_x + current_w - 29.0 * global_scale;
+            let available_w = space_right - space_left;
+            let text_x = space_left + available_w / 2.0;
+
+            canvas.save();
+            let clip_rect = Rect::from_xywh(space_left, offset_y, available_w, current_h);
+            canvas.clip_rect(clip_rect, ClipOp::Intersect, true);
+
+            if use_blur {
+                if lyric_transition < 1.0 && !old_lyric.is_empty() {
+                    let mut text_paint = Paint::default();
+                    text_paint.set_anti_alias(true);
+                    let fade_alpha = (alpha as f32 * (1.0 - lyric_transition)) as u8;
+                    text_paint.set_color(Color::from_argb(fade_alpha, 255, 255, 255));
+                    
+                    let blur_sigma = lyric_transition * 12.0 * global_scale;
+                    if blur_sigma > 0.1 {
+                        text_paint.set_image_filter(image_filters::blur((blur_sigma, 0.0), None, None, None));
+                    }
+                    
+                    let text_y = offset_y + current_h / 2.0 + 4.0 * global_scale - (10.0 * global_scale * lyric_transition);
+                    
+                    crate::ui::expanded::main_view::draw_text_cached(
+                        canvas, old_lyric, (text_x, text_y), 12.0 * global_scale,
+                        skia_safe::FontStyle::normal(), &text_paint, true, available_w
+                    );
+                }
+
+                if !current_lyric.is_empty() {
+                    let mut text_paint = Paint::default();
+                    text_paint.set_anti_alias(true);
+                    let fade_alpha = (alpha as f32 * lyric_transition) as u8;
+                    text_paint.set_color(Color::from_argb(fade_alpha, 255, 255, 255));
+
+                    let blur_sigma = (1.0 - lyric_transition) * 12.0 * global_scale;
+                    if blur_sigma > 0.1 {
+                        text_paint.set_image_filter(image_filters::blur((blur_sigma, 0.0), None, None, None));
+                    }
+
+                    let text_y = offset_y + current_h / 2.0 + 4.0 * global_scale + (10.0 * global_scale * (1.0 - lyric_transition));
+                    
+                    crate::ui::expanded::main_view::draw_text_cached(
+                        canvas, current_lyric, (text_x, text_y), 12.0 * global_scale,
+                        skia_safe::FontStyle::normal(), &text_paint, true, available_w
+                    );
+                }
+            } else {
+                let text_y = offset_y + current_h / 2.0 + 4.0 * global_scale;
+                if lyric_transition < 0.5 && !old_lyric.is_empty() {
+                    let mut text_paint = Paint::default();
+                    text_paint.set_anti_alias(true);
+                    let progress = lyric_transition * 2.0;
+                    let fade_alpha = (alpha as f32 * (1.0 - progress)) as u8;
+                    text_paint.set_color(Color::from_argb(fade_alpha, 255, 255, 255));
+                    
+                    crate::ui::expanded::main_view::draw_text_cached(
+                        canvas, old_lyric, (text_x, text_y), 12.0 * global_scale,
+                        skia_safe::FontStyle::normal(), &text_paint, true, available_w
+                    );
+                } else if lyric_transition >= 0.5 && !current_lyric.is_empty() {
+                    let mut text_paint = Paint::default();
+                    text_paint.set_anti_alias(true);
+                    let progress = (lyric_transition - 0.5) * 2.0;
+                    let fade_alpha = (alpha as f32 * progress) as u8;
+                    text_paint.set_color(Color::from_argb(fade_alpha, 255, 255, 255));
+                    
+                    crate::ui::expanded::main_view::draw_text_cached(
+                        canvas, current_lyric, (text_x, text_y), 12.0 * global_scale,
+                        skia_safe::FontStyle::normal(), &text_paint, true, available_w
+                    );
+                }
+            }
+            canvas.restore();
+        }
     }
     let total_weight: f32 = weights.iter().sum();
     if total_weight > 0.01 {
@@ -142,4 +225,3 @@ pub fn draw_island(
     let _ = sk_surface.read_pixels(&info, u8_buffer, dst_row_bytes, (0, 0));
     buffer.present().unwrap();
 }
-

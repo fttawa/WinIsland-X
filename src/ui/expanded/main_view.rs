@@ -32,7 +32,7 @@ fn get_typeface_for_char(c: char, style: FontStyle) -> Typeface {
         tf
     })
 }
-fn draw_text_cached(canvas: &Canvas, text: &str, pos: (f32, f32), size: f32, style: FontStyle, paint: &Paint, align_center: bool, max_w: f32) {
+pub fn draw_text_cached(canvas: &Canvas, text: &str, pos: (f32, f32), size: f32, style: FontStyle, paint: &Paint, align_center: bool, max_w: f32) {
     let cache_key = format!("{}-{}-{:?}-{}", text, max_w, style, size);
     TEXT_CACHE.with(|cache| {
         let mut cache_mut = cache.borrow_mut();

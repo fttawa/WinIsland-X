@@ -1,11 +1,14 @@
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSession,
 };
 use windows::Foundation::TypedEventHandler;
-#[derive(Clone, Default, Debug)]
+use crate::core::lyrics::{LyricLine, fetch_lyrics};
+
+#[derive(Clone, Debug)]
 pub struct MediaInfo {
     pub title: String,
     pub artist: String,
@@ -13,6 +16,49 @@ pub struct MediaInfo {
     pub is_playing: bool,
     pub thumbnail: Option<Arc<Vec<u8>>>,
     pub spectrum: [f32; 6],
+    pub position_ms: u64,
+    pub last_update: Instant,
+    pub lyrics: Option<Arc<Vec<LyricLine>>>,
+}
+
+impl Default for MediaInfo {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            is_playing: false,
+            thumbnail: None,
+            spectrum: [0.0; 6],
+            position_ms: 0,
+            last_update: Instant::now(),
+            lyrics: None,
+        }
+    }
+}
+
+impl MediaInfo {
+    pub fn current_lyric(&self) -> Option<String> {
+        if let Some(lyrics) = &self.lyrics {
+            let current_pos = if self.is_playing {
+                self.position_ms + self.last_update.elapsed().as_millis() as u64
+            } else {
+                self.position_ms
+            };
+            
+            let mut current_text = None;
+            for line in lyrics.iter() {
+                if line.time_ms <= current_pos {
+                    current_text = Some(line.text.clone());
+                } else {
+                    break;
+                }
+            }
+            current_text
+        } else {
+            None
+        }
+    }
 }
 pub struct SmtcListener {
     info: Arc<Mutex<MediaInfo>>,
@@ -69,6 +115,13 @@ impl SmtcListener {
         let props = session.TryGetMediaPropertiesAsync()?.get()?;
         let pb_info = session.GetPlaybackInfo()?;
         let is_playing = pb_info.PlaybackStatus()? == windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+        
+        let position_ms = if let Ok(tl) = session.GetTimelineProperties() {
+            if let Ok(pos) = tl.Position() {
+                (pos.Duration / 10000) as u64
+            } else { 0 }
+        } else { 0 };
+
         let mut thumb_data = None;
         if let Ok(thumb_ref) = props.Thumbnail() {
             if let Ok(stream) = thumb_ref.OpenReadAsync()?.get() {
@@ -81,12 +134,49 @@ impl SmtcListener {
                 thumb_data = Some(Arc::new(bytes));
             }
         }
+        
+        let new_title = props.Title()?.to_string();
+        let new_artist = props.Artist()?.to_string();
+        let mut should_fetch_lyrics = false;
+
         if let Ok(mut info) = info_arc.lock() {
-            info.title = props.Title()?.to_string();
-            info.artist = props.Artist()?.to_string();
+            let song_changed = info.title != new_title || info.artist != new_artist;
+            if song_changed {
+                info.title = new_title.clone();
+                info.artist = new_artist.clone();
+                info.lyrics = None;
+                should_fetch_lyrics = true;
+            }
             info.album = props.AlbumTitle()?.to_string();
+            
+            let extrapolated = if info.is_playing {
+                info.position_ms + info.last_update.elapsed().as_millis() as u64
+            } else {
+                info.position_ms
+            };
+
+            if song_changed || (position_ms as i64 - extrapolated as i64).abs() > 1500 || info.is_playing != is_playing {
+                info.position_ms = position_ms;
+                info.last_update = Instant::now();
+            }
+            
             info.is_playing = is_playing;
-            info.thumbnail = thumb_data;
+            if thumb_data.is_some() {
+                info.thumbnail = thumb_data;
+            }
+        }
+
+        if should_fetch_lyrics {
+            let arc_clone = info_arc.clone();
+            std::thread::spawn(move || {
+                if let Some(lyrics) = fetch_lyrics(&new_title, &new_artist) {
+                    if let Ok(mut info) = arc_clone.lock() {
+                        if info.title == new_title && info.artist == new_artist {
+                            info.lyrics = Some(lyrics);
+                        }
+                    }
+                }
+            });
         }
         Ok(())
     }

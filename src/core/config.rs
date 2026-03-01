@@ -16,7 +16,14 @@ pub struct AppConfig {
     pub motion_blur: bool,
     pub smtc_enabled: bool,
     pub smtc_apps: Vec<String>,
+    #[serde(default = "default_show_lyrics")]
+    pub show_lyrics: bool,
 }
+
+fn default_show_lyrics() -> bool {
+    true
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -29,6 +36,7 @@ impl Default for AppConfig {
             motion_blur: true,
             smtc_enabled: true,
             smtc_apps: Vec::new(),
+            show_lyrics: true,
         }
     }
 }
