@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
+  base: '/WinIsland/',
   title: "WinIsland",
   description: "A sleek, functional dynamic island for Windows",
   themeConfig: {
