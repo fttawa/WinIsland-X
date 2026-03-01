@@ -48,15 +48,8 @@ pub fn draw_island(
     let mut bg_paint = Paint::default();
     bg_paint.set_color(Color::BLACK);
     bg_paint.set_anti_alias(true);
-    if let Some(ref filter) = blur_filter {
-        let mut layer_paint = Paint::default();
-        layer_paint.set_image_filter(filter.clone());
-        canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&layer_paint));
-        canvas.draw_rrect(rrect, &bg_paint);
-        canvas.restore();
-    } else {
-        canvas.draw_rrect(rrect, &bg_paint);
-    }
+    canvas.draw_rrect(rrect, &bg_paint);
+
     let expanded_alpha_f = (expansion_progress.powf(2.0)).clamp(0.0, 1.0);
     let mini_alpha_f = (1.0 - expansion_progress * 1.5).clamp(0.0, 1.0);
     if expanded_alpha_f > 0.01 {

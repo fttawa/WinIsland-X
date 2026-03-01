@@ -223,19 +223,33 @@ fn get_palette_from_image(img: &Image, cache_key: &str) -> Vec<Color> {
                 }
             }
             if count > 0 {
-                let r_avg = (r_total / count) as f32;
-                let g_avg = (g_total / count) as f32;
-                let b_avg = (b_total / count) as f32;
-                let brighten = |val: f32| -> u8 {
-                    let v = val * 1.5;
-                    (if v < 60.0 { v + 60.0 } else { v }).min(255.0) as u8
+                let r_avg = r_total as f32 / count as f32;
+                let g_avg = g_total as f32 / count as f32;
+                let b_avg = b_total as f32 / count as f32;
+
+                let brighten = |r: f32, g: f32, b: f32, factor: f32| -> Color {
+                    let mut r = r * factor;
+                    let mut g = g * factor;
+                    let mut b = b * factor;
+
+                    let brightness = (r * 0.299 + g * 0.587 + b * 0.114);
+                    if brightness < 80.0 {
+                        let boost = 80.0 - brightness;
+                        r += boost;
+                        g += boost;
+                        b += boost;
+                    }
+
+                    Color::from_rgb(
+                        r.min(255.0) as u8,
+                        g.min(255.0) as u8,
+                        b.min(255.0) as u8
+                    )
                 };
-                let primary = Color::from_rgb(brighten(r_avg), brighten(g_avg), brighten(b_avg));
-                let secondary = Color::from_rgb(
-                    brighten(r_avg * 0.7),
-                    brighten(g_avg * 0.8),
-                    brighten(b_avg * 1.2)
-                );
+
+                let primary = brighten(r_avg, g_avg, b_avg, 1.3);
+                let secondary = brighten(r_avg, g_avg, b_avg, 1.8);
+
                 palette.push(primary);
                 palette.push(secondary);
                 palette.push(primary);
