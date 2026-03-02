@@ -28,5 +28,5 @@ We encourage contributions
 If you have the energy or interest,PR are welcome
 
 ## LICENCE
-[GPL](LICENSE)
+[MIT](LICENSE)
 
