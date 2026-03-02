@@ -52,7 +52,8 @@ impl MusicApp {
                 }
             }
         }
-        let typeface = self.font_mgr.match_family_style("Segoe UI", style)
+        let typeface = self.font_mgr.match_family_style("Microsoft YaHei", style)
+            .or_else(|| self.font_mgr.match_family_style("Segoe UI", style))
             .unwrap_or_else(|| self.font_mgr.legacy_make_typeface(None, style).unwrap());
         Font::from_typeface(typeface, size)
     }

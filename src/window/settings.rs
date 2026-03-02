@@ -79,7 +79,8 @@ impl SettingsApp {
         if let Some(typeface) = &self.custom_font_typeface {
             return Font::from_typeface(typeface.clone(), size);
         }
-        let typeface = self.font_mgr.match_family_style("Segoe UI", style)
+        let typeface = self.font_mgr.match_family_style("Microsoft YaHei", style)
+            .or_else(|| self.font_mgr.match_family_style("Segoe UI", style))
             .unwrap_or_else(|| self.font_mgr.legacy_make_typeface(None, style).unwrap());
         Font::from_typeface(typeface, size)
     }
@@ -309,7 +310,7 @@ impl SettingsApp {
         let v_str = format!("Version {}", APP_VERSION);
         let (_, rect2) = font_norm.measure_str(&v_str, None);
         canvas.draw_str(&v_str, ((SETTINGS_W - rect2.width()) / 2.0, 195.0), &font_norm, &paint);
-        let a_str = format!("{} {}", tr("Created by"), APP_AUTHOR);
+        let a_str = format!("{} {}", tr("created_by"), APP_AUTHOR);
         let (_, rect3) = font_norm.measure_str(&a_str, None);
         canvas.draw_str(&a_str, ((SETTINGS_W - rect3.width()) / 2.0, 220.0), &font_norm, &paint);
         paint.set_color(COLOR_ACCENT);

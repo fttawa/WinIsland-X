@@ -40,30 +40,46 @@ pub fn fetch_lyrics(title: &str, artist: &str) -> Option<Arc<Vec<LyricLine>>> {
     let lyric_json: Value = lyric_res.into_json().ok()?;
     
     let lrc_str = lyric_json.get("lrc")?.get("lyric")?.as_str().unwrap_or("");
+    let tlrc_str = lyric_json.get("tlyric")?.get("lyric")?.as_str().unwrap_or("");
     
-    Some(Arc::new(parse_lyrics(lrc_str)))
+    Some(Arc::new(parse_lyrics(lrc_str, tlrc_str)))
 }
 
-fn parse_lyrics(lrc: &str) -> Vec<LyricLine> {
+fn parse_lyrics(lrc: &str, tlrc: &str) -> Vec<LyricLine> {
     let mut map: BTreeMap<u64, String> = BTreeMap::new();
 
-    for line in lrc.lines() {
-        let line = line.trim();
-        if !line.starts_with('[') { continue; }
-        
-        let parts: Vec<&str> = line.split(']').collect();
-        if parts.len() < 2 { continue; }
-        
-        let text = parts[parts.len() - 1].trim().to_string();
-        for time_part in &parts[..parts.len() - 1] {
-            let time_str = time_part.trim_start_matches('[');
-            if let Some(ms) = parse_time(time_str) {
-                // If same timestamp exists, we keep the first one encountered (or overwrite, map.insert does overwrite)
-                // NetEase usually has original lyrics in 'lrc', so this is fine.
-                map.entry(ms).or_insert(text.clone());
+    let mut process_content = |content: &str| {
+        for line in content.lines() {
+            let line = line.trim();
+            if !line.starts_with('[') { continue; }
+            
+            let parts: Vec<&str> = line.split(']').collect();
+            if parts.len() < 2 { continue; }
+            
+            let text = parts[parts.len() - 1].trim().to_string();
+            if text.is_empty() && content == lrc {
+                // Keep empty lines from main lrc to allow clearing screen
+            } else if text.is_empty() {
+                continue;
+            }
+
+            for time_part in &parts[..parts.len() - 1] {
+                let time_str = time_part.trim_start_matches('[');
+                if let Some(ms) = parse_time(time_str) {
+                    // Priority: if we already have text for this ms, and new text is not empty, 
+                    // we could combine them or keep first. Here we keep the first non-empty.
+                    map.entry(ms).and_modify(|e| {
+                        if e.is_empty() && !text.is_empty() {
+                            *e = text.clone();
+                        }
+                    }).or_insert(text.clone());
+                }
             }
         }
-    }
+    };
+
+    process_content(lrc);
+    process_content(tlrc);
 
     map.into_iter()
         .map(|(time_ms, text)| LyricLine { time_ms, text })
@@ -79,6 +95,8 @@ fn parse_time(time_str: &str) -> Option<u64> {
     let rest = parts[1];
     let (secs_str, ms_str) = if let Some(dot_idx) = rest.find('.') {
         (&rest[..dot_idx], Some(&rest[dot_idx+1..]))
+    } else if let Some(colon_idx) = rest.find(':') {
+        (&rest[..colon_idx], Some(&rest[colon_idx+1..]))
     } else if parts.len() > 2 {
         (parts[1], Some(parts[2]))
     } else {
@@ -90,10 +108,12 @@ fn parse_time(time_str: &str) -> Option<u64> {
     if let Some(ms_raw) = ms_str {
         let mut raw = ms_raw.to_string();
         raw.retain(|c| c.is_ascii_digit());
-        ms = raw.parse::<u64>().ok().unwrap_or(0);
-        if raw.len() == 2 { ms *= 10; }
-        else if raw.len() == 1 { ms *= 100; }
-        else if raw.len() > 3 { ms /= 10u64.pow((raw.len() - 3) as u32); }
+        if !raw.is_empty() {
+            ms = raw.parse::<u64>().ok().unwrap_or(0);
+            if raw.len() == 2 { ms *= 10; }
+            else if raw.len() == 1 { ms *= 100; }
+            else if raw.len() > 3 { ms /= 10u64.pow((raw.len() - 3) as u32); }
+        }
     }
     
     Some(mins * 60000 + secs * 1000 + ms)
