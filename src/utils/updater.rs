@@ -2,9 +2,10 @@ use std::fs;
 use std::path::{PathBuf};
 use serde::{Deserialize, Serialize};
 use crate::core::config::{AppConfig};
-use rfd::{MessageButtons, MessageDialog, MessageLevel, MessageDialogResult};
 use std::process::Command;
 use std::io::Read;
+use windows::core::PCWSTR;
+use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_OKCANCEL, MB_ICONINFORMATION, MB_TOPMOST, MB_SETFOREGROUND, IDOK, IDYES};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VersionInfo {
@@ -63,14 +64,19 @@ pub fn check_for_updates(config: &AppConfig) {
         }
 
         if needs_update {
-            let confirmed = MessageDialog::new()
-                .set_title("Update Available")
-                .set_description(&format!("A new version of WinIsland is available (Released: {}). Would you like to update now?", remote_info.timestamp))
-                .set_buttons(MessageButtons::OkCancel)
-                .set_level(MessageLevel::Info)
-                .show();
+            let title: Vec<u16> = "Update Available\0".encode_utf16().collect();
+            let text: Vec<u16> = format!("A new version of WinIsland is available (Released: {}). Would you like to update now?\0", remote_info.timestamp).encode_utf16().collect();
+            
+            let result = unsafe {
+                MessageBoxW(
+                    None,
+                    PCWSTR(text.as_ptr()),
+                    PCWSTR(title.as_ptr()),
+                    MB_OKCANCEL | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND
+                )
+            };
 
-            if matches!(confirmed, MessageDialogResult::Ok | MessageDialogResult::Yes) {
+            if result == IDOK || result == IDYES {
                 perform_update(remote_json_str, app_dir);
             }
         }
@@ -81,10 +87,11 @@ fn perform_update(remote_json_str: String, app_dir: PathBuf) {
     let resp = match ureq::get(UPDATE_URL_EXE).call() {
         Ok(r) => r,
         Err(_) => {
-            MessageDialog::new()
-                .set_title("Update Failed")
-                .set_description("Failed to download the new version.")
-                .show();
+            let title: Vec<u16> = "Update Failed\0".encode_utf16().collect();
+            let text: Vec<u16> = "Failed to download the new version.\0".encode_utf16().collect();
+            unsafe {
+                MessageBoxW(None, PCWSTR(text.as_ptr()), PCWSTR(title.as_ptr()), MB_ICONINFORMATION | MB_TOPMOST);
+            }
             return;
         }
     };
@@ -98,10 +105,11 @@ fn perform_update(remote_json_str: String, app_dir: PathBuf) {
     let new_exe_path = current_exe.with_extension("exe.new");
     
     if fs::write(&new_exe_path, &bytes).is_err() {
-        MessageDialog::new()
-            .set_title("Update Failed")
-            .set_description("Failed to save the new version.")
-            .show();
+        let title: Vec<u16> = "Update Failed\0".encode_utf16().collect();
+        let text: Vec<u16> = "Failed to save the new version.\0".encode_utf16().collect();
+        unsafe {
+            MessageBoxW(None, PCWSTR(text.as_ptr()), PCWSTR(title.as_ptr()), MB_ICONINFORMATION | MB_TOPMOST);
+        }
         return;
     }
 
