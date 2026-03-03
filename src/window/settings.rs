@@ -272,7 +272,7 @@ impl SettingsApp {
         paint.set_color(COLOR_DANGER);
         let reset_str = tr("reset_defaults");
         let (_, rect) = font.measure_str(&reset_str, None);
-        let reset_y = if self.config.auto_hide { 810.0 } else { 760.0 };
+        let reset_y = if self.config.auto_hide { delay_y + 60.0 } else { lang_y + 60.0 };
         canvas.draw_str(&reset_str, ((SETTINGS_W - rect.width()) / 2.0, reset_y), &font, &paint);
     }
     fn draw_text_button_danger(&self, canvas: &skia_safe::Canvas, x: f32, y: f32, w: f32, h: f32, label: &str) {
@@ -456,6 +456,72 @@ impl SettingsApp {
             if let Some(win) = &self.window { win.request_redraw(); }
         }
     }
+    fn get_hover_state(&self) -> bool {
+        let (mx, my) = self.logical_mouse_pos;
+        let cx = SETTINGS_W / 2.0;
+        
+        let win = self.window.as_ref().unwrap();
+        let scale = win.scale_factor() as f32;
+        let size = win.inner_size();
+        let dx = ((size.width as f32 / scale) - SETTINGS_W) / 2.0;
+        let dy = ((size.height as f32 / scale) - SETTINGS_H) / 2.0;
+        let lmx = mx - dx;
+        let lmy = my - dy;
+
+        let content_my = if self.active_tab == 0 && lmy >= 70.0 {
+            lmy + self.scroll_y
+        } else {
+            lmy
+        };
+
+        if lmy >= 20.0 && lmy <= 56.0 {
+            if lmx >= cx - 85.0 && lmx <= cx + 85.0 { return true; }
+        }
+        if self.active_tab == 0 {
+            let sy = 90.0;
+            if Self::in_rect(lmx, content_my, 270.0, sy + 2.0, 28.0, 28.0) { return true; }
+            if Self::in_rect(lmx, content_my, 345.0, sy + 2.0, 28.0, 28.0) { return true; }
+            if Self::in_rect(lmx, content_my, 270.0, sy + 52.0, 28.0, 28.0) { return true; }
+            if Self::in_rect(lmx, content_my, 345.0, sy + 52.0, 28.0, 28.0) { return true; }
+            if Self::in_rect(lmx, content_my, 270.0, sy + 102.0, 28.0, 28.0) { return true; }
+            if Self::in_rect(lmx, content_my, 345.0, sy + 102.0, 28.0, 28.0) { return true; }
+            if Self::in_rect(lmx, content_my, 270.0, sy + 152.0, 28.0, 28.0) { return true; }
+            if Self::in_rect(lmx, content_my, 345.0, sy + 152.0, 28.0, 28.0) { return true; }
+            if Self::in_rect(lmx, content_my, 270.0, sy + 202.0, 28.0, 28.0) { return true; }
+            if Self::in_rect(lmx, content_my, 345.0, sy + 202.0, 28.0, 28.0) { return true; }
+
+            let sw_border_y = sy + 260.0;
+            if Self::in_rect(lmx, content_my, 326.0, sw_border_y + 3.0, 48.0, 26.0) { return true; }
+            if Self::in_rect(lmx, content_my, 326.0, sw_border_y + 53.0, 48.0, 26.0) { return true; }
+            let font_y = sw_border_y + 100.0;
+            if Self::in_rect(lmx, content_my, 310.0, font_y + 3.0, 65.0, 26.0) { return true; }
+            if self.config.custom_font_path.is_some() && Self::in_rect(lmx, content_my, 235.0, font_y + 3.0, 65.0, 26.0) { return true; }
+
+            let autostart_y = font_y + 50.0;
+            if Self::in_rect(lmx, content_my, 326.0, autostart_y + 3.0, 48.0, 26.0) { return true; }
+            let autohide_y = autostart_y + 50.0;
+            if Self::in_rect(lmx, content_my, 326.0, autohide_y + 3.0, 48.0, 26.0) { return true; }
+            let update_y = autohide_y + 50.0;
+            if Self::in_rect(lmx, content_my, 326.0, update_y + 3.0, 48.0, 26.0) { return true; }
+            let interval_y = update_y + 50.0;
+            if self.config.check_for_updates {
+                if Self::in_rect(lmx, content_my, 270.0, interval_y + 2.0, 28.0, 28.0) { return true; }
+                if Self::in_rect(lmx, content_my, 345.0, interval_y + 2.0, 28.0, 28.0) { return true; }
+            }
+            let lang_y = interval_y + 50.0;
+            if Self::in_rect(lmx, content_my, 300.0, lang_y + 3.0, 75.0, 26.0) { return true; }
+            let delay_y = lang_y + 50.0;
+            if self.config.auto_hide {
+                if Self::in_rect(lmx, content_my, 270.0, delay_y + 2.0, 28.0, 28.0) { return true; }
+                if Self::in_rect(lmx, content_my, 345.0, delay_y + 2.0, 28.0, 28.0) { return true; }
+            }
+            let reset_y = if self.config.auto_hide { delay_y + 60.0 } else { lang_y + 60.0 };
+            if lmx >= cx - 100.0 && lmx <= cx + 100.0 && content_my >= reset_y - 24.0 && content_my <= reset_y + 12.0 { return true; }
+        } else if lmy >= 260.0 && lmy <= 300.0 && lmx >= cx - 100.0 && lmx <= cx + 100.0 {
+            return true;
+        }
+        false
+    }
     fn in_rect(mx: f32, my: f32, x: f32, y: f32, w: f32, h: f32) -> bool {
         mx >= x && mx <= x + w && my >= y && my <= y + h
     }
@@ -509,6 +575,14 @@ impl ApplicationHandler for SettingsApp {
             WindowEvent::CursorMoved { position, .. } => {
                 let scale = self.window.as_ref().unwrap().scale_factor() as f32;
                 self.logical_mouse_pos = (position.x as f32 / scale, position.y as f32 / scale);
+                if let Some(win) = &self.window {
+                    let cursor = if self.get_hover_state() {
+                        winit::window::CursorIcon::Pointer
+                    } else {
+                        winit::window::CursorIcon::Default
+                    };
+                    win.set_cursor(cursor);
+                }
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 if self.active_tab == 0 {

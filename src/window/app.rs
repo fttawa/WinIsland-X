@@ -379,6 +379,11 @@ impl ApplicationHandler for App {
                                 .arg("--settings")
                                 .spawn();
                         }
+                        Some(TrayAction::OpenMusicSettings) => {
+                            let _ = std::process::Command::new(std::env::current_exe().unwrap())
+                                .arg("--music-settings")
+                                .spawn();
+                        }
                         Some(TrayAction::Exit) => {
                             event_loop.exit();
                         }

@@ -196,6 +196,33 @@ impl MusicApp {
         let (_, rect) = font.measure_str(label, None);
         canvas.draw_str(label, (x + (w - rect.width()) / 2.0, y + 16.0), &font, &paint);
     }
+    fn get_hover_state(&self) -> bool {
+        let (mx, my) = self.logical_mouse_pos;
+        let win = self.window.as_ref().unwrap();
+        let scale = win.scale_factor() as f32;
+        let size = win.inner_size();
+        let dx = ((size.width as f32 / scale) - MUSIC_W) / 2.0;
+        let dy = ((size.height as f32 / scale) - MUSIC_H) / 2.0;
+        let lmx = mx - dx;
+        let lmy = my - dy;
+
+        if lmx >= 320.0 && lmx <= 380.0 && lmy >= 80.0 && lmy <= 110.0 { return true; }
+        if lmx >= 320.0 && lmx <= 380.0 && lmy >= 130.0 && lmy <= 160.0 { return true; }
+        
+        let media_apps_y = 195.0;
+
+        if self.config.smtc_enabled {
+            if lmx >= MUSIC_W - 130.0 && lmx <= MUSIC_W - 20.0 && lmy >= media_apps_y && lmy <= media_apps_y + 24.0 { return true; }
+            let mut current_y = media_apps_y + 30.0;
+            for _app in &self.detected_apps {
+                if lmx >= 320.0 && lmx <= 380.0 && lmy >= current_y && lmy <= current_y + 45.0 { return true; }
+                if lmx >= 20.0 && lmx <= 320.0 && lmy >= current_y && lmy <= current_y + 45.0 { return true; }
+                current_y += 50.0;
+                if current_y > MUSIC_H - 50.0 { break; }
+            }
+        }
+        false
+    }
     fn handle_click(&mut self) {
         let (mx, my) = self.logical_mouse_pos;
         let mut changed = false;
@@ -297,6 +324,14 @@ impl ApplicationHandler for MusicApp {
             WindowEvent::CursorMoved { position, .. } => {
                 let scale = self.window.as_ref().unwrap().scale_factor() as f32;
                 self.logical_mouse_pos = (position.x as f32 / scale, position.y as f32 / scale);
+                if let Some(win) = &self.window {
+                    let cursor = if self.get_hover_state() {
+                        winit::window::CursorIcon::Pointer
+                    } else {
+                        winit::window::CursorIcon::Default
+                    };
+                    win.set_cursor(cursor);
+                }
             }
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => self.handle_click(),
             WindowEvent::RedrawRequested => self.draw(),
