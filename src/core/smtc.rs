@@ -20,6 +20,7 @@ pub struct MediaInfo {
     pub last_update: Instant,
     pub lyrics: Option<Arc<Vec<LyricLine>>>,
     pub last_smtc_pos: u64,
+    pub duration_secs: u64,
 }
 
 impl Default for MediaInfo {
@@ -35,6 +36,7 @@ impl Default for MediaInfo {
             last_update: Instant::now(),
             lyrics: None,
             last_smtc_pos: 0,
+            duration_secs: 0,
         }
     }
 }
@@ -66,16 +68,54 @@ impl MediaInfo {
 pub struct SmtcListener {
     info: Arc<Mutex<MediaInfo>>,
     active: Arc<AtomicBool>,
+    lyrics_source: Arc<Mutex<String>>,
+    lyrics_fallback: Arc<Mutex<bool>>,
 }
 
 impl SmtcListener {
-    pub fn new() -> Self {
+    pub fn new(source: String, fallback: bool) -> Self {
         let listener = Self {
             info: Arc::new(Mutex::new(MediaInfo::default())),
             active: Arc::new(AtomicBool::new(true)),
+            lyrics_source: Arc::new(Mutex::new(source)),
+            lyrics_fallback: Arc::new(Mutex::new(fallback)),
         };
         listener.init();
         listener
+    }
+
+    pub fn set_lyrics_source(&self, source: String) {
+        {
+            let mut s = self.lyrics_source.lock().unwrap();
+            if *s == source { return; }
+            *s = source.clone();
+        }
+
+        let (title, artist, duration_secs) = {
+            let mut info = self.info.lock().unwrap();
+            if info.title.is_empty() { return; }
+            info.lyrics = None;
+            (info.title.clone(), info.artist.clone(), info.duration_secs)
+        };
+
+        let arc_clone = self.info.clone();
+        let source_arc = self.lyrics_source.clone();
+        let fallback_arc = self.lyrics_fallback.clone();
+        std::thread::spawn(move || {
+            let src = source_arc.lock().unwrap().clone();
+            let fb = *fallback_arc.lock().unwrap();
+            if let Some(lyrics) = fetch_lyrics(&title, &artist, duration_secs, &src, fb) {
+                if let Ok(mut info) = arc_clone.lock() {
+                    if info.title == title && info.artist == artist {
+                        info.lyrics = Some(lyrics);
+                    }
+                }
+            }
+        });
+    }
+
+    pub fn set_lyrics_fallback(&self, fallback: bool) {
+        *self.lyrics_fallback.lock().unwrap() = fallback;
     }
 
     pub fn get_info(&self) -> MediaInfo {
@@ -85,6 +125,8 @@ impl SmtcListener {
     fn init(&self) {
         let info_clone = self.info.clone();
         let active_clone = self.active.clone();
+        let source_clone = self.lyrics_source.clone();
+        let fallback_clone = self.lyrics_fallback.clone();
         std::thread::spawn(move || {
             let manager = match GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
                 Ok(op) => match op.get() {
@@ -94,9 +136,9 @@ impl SmtcListener {
                 Err(_) => return,
             };
 
-            let update_info = |mgr: &GlobalSystemMediaTransportControlsSessionManager, arc: &Arc<Mutex<MediaInfo>>| {
+            let update_info = |mgr: &GlobalSystemMediaTransportControlsSessionManager, arc: &Arc<Mutex<MediaInfo>>, src: &Arc<Mutex<String>>, fb: &Arc<Mutex<bool>>| {
                 if let Ok(session) = mgr.GetCurrentSession() {
-                    let _ = Self::fetch_properties(&session, arc);
+                    let _ = Self::fetch_properties(&session, arc, src, fb);
                 } else {
                     if let Ok(mut info) = arc.lock() {
                         if !info.title.is_empty() {
@@ -106,12 +148,14 @@ impl SmtcListener {
                 }
             };
 
-            update_info(&manager, &info_clone);
+            update_info(&manager, &info_clone, &source_clone, &fallback_clone);
 
             let info_for_handler = info_clone.clone();
+            let source_for_handler = source_clone.clone();
+            let fallback_for_handler = fallback_clone.clone();
             let handler = TypedEventHandler::new(move |m: &Option<GlobalSystemMediaTransportControlsSessionManager>, _| {
                 if let Some(mgr) = m {
-                    let _ = update_info(mgr, &info_for_handler);
+                    let _ = update_info(mgr, &info_for_handler, &source_for_handler, &fallback_for_handler);
                 }
                 Ok(())
             });
@@ -119,22 +163,26 @@ impl SmtcListener {
 
             while active_clone.load(Ordering::Relaxed) {
                 if let Ok(session) = manager.GetCurrentSession() {
-                    let _ = Self::fetch_properties(&session, &info_clone);
+                    let _ = Self::fetch_properties(&session, &info_clone, &source_clone, &fallback_clone);
                 }
                 std::thread::sleep(Duration::from_millis(300));
             }
         });
     }
 
-    fn fetch_properties(session: &GlobalSystemMediaTransportControlsSession, info_arc: &Arc<Mutex<MediaInfo>>) -> windows::core::Result<()> {
+    fn fetch_properties(session: &GlobalSystemMediaTransportControlsSession, info_arc: &Arc<Mutex<MediaInfo>>, source: &Arc<Mutex<String>>, fallback: &Arc<Mutex<bool>>) -> windows::core::Result<()> {
         let props = session.TryGetMediaPropertiesAsync()?.get()?;
         let pb_info = session.GetPlaybackInfo()?;
         let is_playing = pb_info.PlaybackStatus()? == windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
-        
+
         let smtc_pos = if let Ok(tl) = session.GetTimelineProperties() {
             if let Ok(pos) = tl.Position() {
                 (pos.Duration / 10000) as u64
             } else { 0 }
+        } else { 0 };
+
+        let duration_secs = if let Ok(tl) = session.GetTimelineProperties() {
+            if let Ok(end) = tl.EndTime() { (end.Duration / 10_000_000) as u64 } else { 0 }
         } else { 0 };
 
         let new_title = props.Title()?.to_string();
@@ -155,8 +203,9 @@ impl SmtcListener {
                 should_fetch_lyrics = true;
                 should_fetch_thumbnail = true;
             }
-            
+
             info.album = props.AlbumTitle()?.to_string();
+            info.duration_secs = duration_secs;
             
             let current_extrapolated = if info.is_playing {
                 info.position_ms + info.last_update.elapsed().as_millis() as u64
@@ -213,8 +262,12 @@ impl SmtcListener {
 
         if should_fetch_lyrics {
             let arc_clone = info_arc.clone();
+            let source_arc_clone = source.clone();
+            let fallback_arc_clone = fallback.clone();
             std::thread::spawn(move || {
-                if let Some(lyrics) = fetch_lyrics(&new_title, &new_artist) {
+                let src = source_arc_clone.lock().unwrap().clone();
+                let fb = *fallback_arc_clone.lock().unwrap();
+                if let Some(lyrics) = fetch_lyrics(&new_title, &new_artist, duration_secs, &src, fb) {
                     if let Ok(mut info) = arc_clone.lock() {
                         if info.title == new_title && info.artist == new_artist {
                             info.lyrics = Some(lyrics);

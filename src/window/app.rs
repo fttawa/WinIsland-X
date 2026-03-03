@@ -78,7 +78,7 @@ impl Default for App {
             spring_h: Spring::new(config.base_height * config.global_scale),
             spring_r: Spring::new((config.base_height * config.global_scale) / 2.0),
             spring_view: Spring::new(0.0),
-            smtc: SmtcListener::new(),
+            smtc: SmtcListener::new(config.lyrics_source.clone(), config.lyrics_fallback),
             audio: AudioProcessor::new(),
             os_w: 0,
             os_h: 0,
@@ -399,6 +399,8 @@ impl ApplicationHandler for App {
                     let old_max_h = self.config.expanded_height;
                     
                     self.config = current_config;
+                    self.smtc.set_lyrics_source(self.config.lyrics_source.clone());
+                    self.smtc.set_lyrics_fallback(self.config.lyrics_fallback);
                     
                     let max_w = self.config.expanded_width.max(450.0);
                     let new_os_w = (max_w * self.config.global_scale + PADDING) as u32;
