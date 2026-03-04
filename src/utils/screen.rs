@@ -2,14 +2,14 @@ use std::ffi::c_void;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, ReleaseDC,
-    SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, GetDIBits, HBITMAP,
-    SRCCOPY, CAPTUREBLT, CreatedHDC,
+    SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, GetDIBits, HBITMAP, HDC,
+    SRCCOPY, CAPTUREBLT,
 };
 use skia_safe::{Image, ImageInfo, ColorType, AlphaType, ISize, Data, images};
 
 pub struct ScreenCapture {
-    screen_dc: CreatedHDC,
-    mem_dc: CreatedHDC,
+    screen_dc: HDC,
+    mem_dc: HDC,
     bitmap: HBITMAP,
     width: i32,
     height: i32,
