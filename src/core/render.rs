@@ -79,7 +79,7 @@ pub fn draw_island(
     if acrylic_effect {
         bg_paint.set_color(Color::from_argb(150, 20, 20, 20)); // More transparent for blur to show through
         // Add noise filter
-        let noise_shader = skia_safe::shaders::perlin_noise_turbulence(
+        let noise_shader = skia_safe::shaders::fractal_noise(
             (0.5, 0.5),
             1,
             0.0,
