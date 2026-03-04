@@ -1,11 +1,11 @@
 use std::ffi::c_void;
-use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, ReleaseDC,
-    SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, GetDIBits, HBITMAP, HDC,
+    SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, GetDIBits, HBITMAP,
     SRCCOPY, CAPTUREBLT, CreatedHDC,
 };
-use skia_safe::{Image, ImageInfo, ColorType, AlphaType, ISize, Data};
+use skia_safe::{Image, ImageInfo, ColorType, AlphaType, ISize, Data, images};
 
 pub struct ScreenCapture {
     screen_dc: CreatedHDC,
@@ -74,7 +74,7 @@ impl ScreenCapture {
                     biHeight: -self.height, // Top-down
                     biPlanes: 1,
                     biBitCount: 32,
-                    biCompression: BI_RGB,
+                    biCompression: BI_RGB.0,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -102,10 +102,11 @@ impl ScreenCapture {
             
             // Safety: pixels is valid and size matches
             let data = Data::new_copy(&self.pixels);
-            Image::from_raster_data(&info, data, (self.width * 4) as usize)
+            images::raster_from_data(&info, data, (self.width * 4) as usize)
         }
     }
 }
+
 
 impl Drop for ScreenCapture {
     fn drop(&mut self) {
