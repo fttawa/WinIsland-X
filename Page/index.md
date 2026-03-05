@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "WinIsland"
   text: "Sleek. Dynamic. Windows."
-  tagline: "A functional dynamic island for your Windows desktop, built with Rust."
+  tagline: "A visually stunning and extensible dynamic island for your Windows desktop."
   image:
     src: /icon.png
     alt: WinIsland
@@ -18,11 +18,15 @@ hero:
 
 features:
   - title: "Rust Powered"
-    details: "Built with Rust and Skia for high performance and low resource usage."
-  - title: "Dynamic Animations"
-    details: "Fluid spring-based animations for a smooth and modern feel ."
+    details: "High performance rendering with Skia GPU acceleration."
+  - title: "Enhanced Visuals"
+    details: "Real Acrylic, Mica effects with noise textures and soft glows."
+  - title: "Plugin System"
+    details: "Fully extensible via DLL plugins. Add your own widgets and tools."
   - title: "Media Integration"
-    details: "Real-time media control and spectrum visualization at your fingertips."
+    details: "SMTC support, real-time spectrum, and dynamic progress bars."
+  - title: "Fluid Physics"
+    details: "Natural animations powered by a mass-spring-damper engine."
   - title: "Customizable"
-    details: "Highly configurable to match your desktop aesthetic perfectly."
+    details: "Control FPS, GPU status, and themes with a native color picker."
 ---

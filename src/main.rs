@@ -31,9 +31,10 @@ fn main() {
         }
         crate::utils::updater::start_update_checker();
         
+        crate::core::plugin::PLUGIN_MANAGER.lock().unwrap().scan_plugins();
+        
         let event_loop = EventLoop::new().unwrap();
         let mut app = App::default();
         event_loop.run_app(&mut app).unwrap();
     }
 }
-//test

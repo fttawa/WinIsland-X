@@ -1,7 +1,7 @@
 use skia_safe::{
     Canvas, Paint, Color, Font, FontStyle, FontMgr, Rect, RRect,
     Point, Data, Image, SamplingOptions, FilterMode, MipmapMode, Typeface,
-    gradient_shader, TileMode
+    gradient_shader, TileMode, ClipOp
 };
 use crate::icons::arrows::draw_arrow_right;
 use crate::core::smtc::MediaInfo;
@@ -32,21 +32,16 @@ fn get_custom_typeface() -> Option<Typeface> {
         CUSTOM_TYPEFACE.with(|cache| {
             let mut cache_mut = cache.borrow_mut();
             if let Some((ref cached_path, ref tf)) = *cache_mut {
-                if cached_path == &path {
-                    return Some(tf.clone());
-                }
+                if cached_path == &path { return Some(tf.clone()); }
             }
             if let Ok(data) = std::fs::read(&path) {
                 if let Some(tf) = FONT_MGR.with(|mgr| mgr.new_from_data(&data, None)) {
-                    *cache_mut = Some((path, tf.clone()));
-                    return Some(tf);
+                    *cache_mut = Some((path, tf.clone())); return Some(tf);
                 }
             }
             None
         })
-    } else {
-        None
-    }
+    } else { None }
 }
 
 fn get_typeface_for_char(c: char, style: FontStyle) -> Typeface {
@@ -55,20 +50,13 @@ fn get_typeface_for_char(c: char, style: FontStyle) -> Typeface {
         let mut cache = cache.borrow_mut();
         if cache.len() > 2000 { cache.clear(); }
         if let Some(tf) = cache.get(&(c, s_key)) { return tf.clone(); }
-        
         if let Some(tf) = get_custom_typeface() {
-            let mut glyphs = [0u16; 1];
-            tf.unichars_to_glyphs(&[c as i32], &mut glyphs);
-            if glyphs[0] != 0 {
-                cache.insert((c, s_key), tf.clone());
-                return tf;
-            }
+            let mut glyphs = [0u16; 1]; tf.unichars_to_glyphs(&[c as i32], &mut glyphs);
+            if glyphs[0] != 0 { cache.insert((c, s_key), tf.clone()); return tf; }
         }
-
         let tf = FONT_MGR.with(|mgr| mgr.match_family_style_character("", style, &["zh-CN", "ja-JP", "en-US"], c as i32))
             .unwrap_or_else(|| FONT_MGR.with(|mgr| mgr.legacy_make_typeface(None, style).unwrap()));
-        cache.insert((c, s_key), tf.clone());
-        tf
+        cache.insert((c, s_key), tf.clone()); tf
     })
 }
 
@@ -94,8 +82,7 @@ pub fn draw_text_cached(canvas: &Canvas, text: &str, pos: (f32, f32), size: f32,
                 let tf = get_typeface_for_char(c, style);
                 if let Some(ref ltf) = last_tf {
                     if ltf.unique_id() != tf.unique_id() {
-                        groups.push((current_group.clone(), ltf.clone()));
-                        current_group.clear();
+                        groups.push((current_group.clone(), ltf.clone())); current_group.clear();
                     }
                 }
                 last_tf = Some(tf); current_group.push(c);
@@ -108,8 +95,7 @@ pub fn draw_text_cached(canvas: &Canvas, text: &str, pos: (f32, f32), size: f32,
         if align_center {
             for (s, tf) in groups {
                 let font = Font::from_typeface(tf.clone(), size);
-                let (w, _) = font.measure_str(s, None);
-                total_width += w;
+                let (w, _) = font.measure_str(s, None); total_width += w;
             }
         }
         let mut x = if align_center { pos.0 - total_width / 2.0 } else { pos.0 };
@@ -117,8 +103,7 @@ pub fn draw_text_cached(canvas: &Canvas, text: &str, pos: (f32, f32), size: f32,
         for (s, tf) in groups {
             let font = Font::from_typeface(tf.clone(), size);
             canvas.draw_str(s, (x.round(), y), &font, paint);
-            let (w, _) = font.measure_str(s, None);
-            x += w;
+            let (w, _) = font.measure_str(s, None); x += w;
         }
     });
 }
@@ -129,17 +114,11 @@ pub fn get_cached_media_image(media: &MediaInfo) -> Option<Image> {
     let mut result = None;
     IMG_CACHE.with(|cache| {
         let mut cache_mut = cache.borrow_mut();
-        if let Some((key, img)) = cache_mut.as_ref() {
-            if key == &cache_key {
-                result = Some(img.clone());
-                return;
-            }
-        }
+        if let Some((key, img)) = cache_mut.as_ref() { if key == &cache_key { result = Some(img.clone()); return; } }
         if let Some(ref bytes_arc) = media.thumbnail {
             let data = Data::new_copy(&**bytes_arc);
             if let Some(image) = Image::from_encoded(data) {
-                *cache_mut = Some((cache_key.clone(), image.clone()));
-                result = Some(image);
+                *cache_mut = Some((cache_key.clone(), image.clone())); result = Some(image);
             }
         }
     });
@@ -150,45 +129,36 @@ pub fn get_media_palette(media: &MediaInfo) -> Vec<Color> {
     if let Some(img) = get_cached_media_image(media) {
         let cache_key = format!("{}-{}", media.title, media.album);
         get_palette_from_image(&img, &cache_key)
-    } else {
-        vec![Color::from_rgb(180, 180, 180), Color::from_rgb(100, 100, 100)]
-    }
+    } else { vec![Color::from_rgb(180, 180, 180), Color::from_rgb(100, 100, 100)] }
 }
 
-pub fn draw_main_page(canvas: &Canvas, ox: f32, oy: f32, w: f32, h: f32, alpha: u8, media: &MediaInfo, music_active: bool, view_offset: f32, scale: f32, expansion_progress: f32, viz_h_scale: f32) {
+use crate::core::config::{AppConfig, ProgressBarStyle};
+
+pub fn draw_main_page(canvas: &Canvas, ox: f32, oy: f32, w: f32, h: f32, alpha: u8, media: &MediaInfo, music_active: bool, view_offset: f32, scale: f32, expansion_progress: f32, viz_h_scale: f32, fps: f32, config: &AppConfig) {
     let arrow_alpha = (alpha as f32 * (1.0 - view_offset * 5.0).clamp(0.0, 1.0)) as u8;
-    if arrow_alpha > 0 {
-        draw_arrow_right(canvas, ox + w - 12.0 * scale, oy + h / 2.0, arrow_alpha, scale);
-    }
+    if arrow_alpha > 0 { draw_arrow_right(canvas, ox + w - 12.0 * scale, oy + h / 2.0, arrow_alpha, scale); }
+    
+    // Shift up slightly to leave space for widget area
+    let layout_y_offset = -4.0 * scale;
     let img_size = 72.0 * scale;
     let img_x = ox + 24.0 * scale;
-    let img_y = oy + 24.0 * scale;
+    let img_y = oy + 24.0 * scale + layout_y_offset;
     let image_to_draw = if music_active { get_cached_media_image(media) } else { None };
     let cache_key = if music_active { format!("{}-{}", media.title, media.album) } else { "none".to_string() };
-    let palette = if let Some(ref img) = image_to_draw {
-        get_palette_from_image(img, &cache_key)
-    } else {
-        vec![Color::from_rgb(180, 180, 180), Color::from_rgb(100, 100, 100)]
-    };
+    let palette = if let Some(ref img) = image_to_draw { get_palette_from_image(img, &cache_key) } else { vec![Color::from_rgb(180, 180, 180), Color::from_rgb(100, 100, 100)] };
+    
     canvas.save();
-    canvas.clip_rrect(RRect::new_rect_xy(Rect::from_xywh(img_x, img_y, img_size, img_size), 14.0 * scale, 14.0 * scale), skia_safe::ClipOp::Intersect, true);
+    canvas.clip_rrect(RRect::new_rect_xy(Rect::from_xywh(img_x, img_y, img_size, img_size), 14.0 * scale, 14.0 * scale), ClipOp::Intersect, true);
     if let Some(img) = image_to_draw {
-        let mut img_paint = Paint::default();
-        img_paint.set_anti_alias(true);
-        img_paint.set_alpha_f(alpha as f32 / 255.0);
-        canvas.draw_image_rect_with_sampling_options(
-            &img, None, Rect::from_xywh(img_x, img_y, img_size, img_size),
-            SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear), &img_paint
-        );
-    } else {
-        draw_placeholder(canvas, img_x, img_y, img_size, alpha, scale);
-    }
+        let mut img_paint = Paint::default(); img_paint.set_anti_alias(true); img_paint.set_alpha_f(alpha as f32 / 255.0);
+        canvas.draw_image_rect_with_sampling_options(&img, None, Rect::from_xywh(img_x, img_y, img_size, img_size), SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear), &img_paint);
+    } else { draw_placeholder(canvas, img_x, img_y, img_size, alpha, scale); }
     canvas.restore();
+
     let text_x = img_x + img_size + 16.0 * scale;
     let max_text_w = w - (text_x - ox) - 100.0 * scale;
     let title_y = img_y + 26.0 * scale;
-    let mut text_paint = Paint::default();
-    text_paint.set_anti_alias(true);
+    let mut text_paint = Paint::default(); text_paint.set_anti_alias(true);
     let title = if !music_active || media.title.is_empty() { "No Music playing" } else { &media.title };
     let artist = if !music_active || media.artist.is_empty() { "Unknown Artist" } else { &media.artist };
     text_paint.set_color(Color::from_argb(alpha, 255, 255, 255));
@@ -198,44 +168,123 @@ pub fn draw_main_page(canvas: &Canvas, ox: f32, oy: f32, w: f32, h: f32, alpha: 
     
     let viz_x_offset = 17.0 + (45.0 - 17.0) * expansion_progress;
     draw_visualizer(canvas, ox + w - viz_x_offset * scale, title_y - 4.0 * scale, alpha, music_active && media.is_playing, &palette, &media.spectrum, scale, viz_h_scale, (0.6, 0.08));
+
+    // Widget Area below music info
+    if expansion_progress > 0.6 {
+        let widget_alpha = ((expansion_progress - 0.6) * 2.5 * alpha as f32).clamp(0.0, 255.0) as u8;
+        draw_widget_area(canvas, ox + 24.0 * scale, oy + h - 68.0 * scale, w - 48.0 * scale, 48.0 * scale, widget_alpha, scale, fps, media, config, &palette);
+    }
+}
+
+fn draw_widget_area(canvas: &Canvas, x: f32, y: f32, w: f32, h: f32, alpha: u8, scale: f32, fps: f32, media: &MediaInfo, config: &AppConfig, palette: &[Color]) {
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(Color::from_argb((alpha as f32 * 0.15) as u8, 255, 255, 255));
+    canvas.draw_round_rect(Rect::from_xywh(x, y, w, h), 12.0 * scale, 12.0 * scale, &paint);
+    
+    // Progress Bar
+    if config.show_progress_bar {
+        let progress_y = y + 12.0 * scale;
+        let progress_h = 4.0 * scale;
+        let progress_w = w - 24.0 * scale;
+        let progress_x = x + 12.0 * scale;
+        
+        // Background - ALWAYS DRAW
+        paint.set_color(Color::from_argb((alpha as f32 * 0.2) as u8, 255, 255, 255));
+        canvas.draw_round_rect(Rect::from_xywh(progress_x, progress_y, progress_w, progress_h), 2.0 * scale, 2.0 * scale, &paint);
+        
+        if media.duration_secs > 0 {
+            let current_pos_ms = if media.is_playing {
+                media.position_ms + media.last_update.elapsed().as_millis() as u64
+            } else {
+                media.position_ms
+            };
+            let progress = (current_pos_ms as f32 / (media.duration_secs as f32 * 1000.0)).clamp(0.0, 1.0);
+            
+            // Foreground
+            let mut fg_paint = Paint::default();
+            fg_paint.set_anti_alias(true);
+            
+            // Brighten color if too dark for black background
+            let mut bar_color = if let Some(c) = palette.get(0) {
+                Color::from_argb(alpha, c.r(), c.g(), c.b())
+            } else {
+                Color::from_argb(alpha, 255, 255, 255)
+            };
+            if bar_color.r() < 50 && bar_color.g() < 50 && bar_color.b() < 50 {
+                bar_color = Color::from_argb(alpha, 200, 200, 200);
+            }
+
+            match config.progress_bar_style {
+                ProgressBarStyle::Gradient => {
+                    let colors: Vec<Color> = palette.iter().map(|c| {
+                        let mut col = Color::from_argb(alpha, c.r(), c.g(), c.b());
+                        if col.r() < 50 && col.g() < 50 && col.b() < 50 { col = Color::from_argb(alpha, 180, 180, 180); }
+                        col
+                    }).collect();
+                    if colors.len() >= 2 {
+                        let shader = gradient_shader::linear(
+                            (Point::new(progress_x, progress_y), Point::new(progress_x + progress_w * progress, progress_y)),
+                            colors.as_slice(), None, TileMode::Clamp, None, None
+                        ).unwrap();
+                        fg_paint.set_shader(shader);
+                    } else {
+                        fg_paint.set_color(bar_color);
+                    }
+                },
+                ProgressBarStyle::Solid => {
+                    fg_paint.set_color(bar_color);
+                }
+            }
+            canvas.draw_round_rect(Rect::from_xywh(progress_x, progress_y, (progress_w * progress).max(1.0), progress_h), 2.0 * scale, 2.0 * scale, &fg_paint);
+        }
+    }
+
+    let text_y = y + h - 14.0 * scale;
+    let font = Font::new(FONT_MGR.with(|mgr| mgr.legacy_make_typeface(None, FontStyle::normal()).unwrap()), 11.0 * scale);
+    
+    if config.show_fps {
+        paint.set_color(Color::from_argb(alpha, 255, 255, 255));
+        // 取整显示，减少视觉抖动
+        canvas.draw_str(&format!("FPS: {:.0}", fps), (x + 12.0 * scale, text_y), &font, &paint);
+    }
+
+    if let Ok(pm) = crate::core::plugin::PLUGIN_MANAGER.try_lock() {
+        if !pm.custom_text.is_empty() {
+            paint.set_color(Color::from_argb((alpha as f32 * 0.8) as u8, 255, 255, 255));
+            let (_, rect) = font.measure_str(&pm.custom_text, None);
+            let center_x = x + w / 2.0 - rect.width() / 2.0;
+            canvas.draw_str(&pm.custom_text, (center_x, text_y), &font, &paint);
+        }
+    }
+    
+    if config.show_gpu_status {
+        paint.set_color(Color::from_argb((alpha as f32 * 0.5) as u8, 255, 255, 255));
+        let gpu_text = if config.use_gpu { "GPU High Performance" } else { "CPU Rendering" };
+        canvas.draw_str(gpu_text, (x + w - 110.0 * scale, text_y), &font, &paint);
+    }
 }
 
 pub fn draw_visualizer(canvas: &Canvas, x: f32, y: f32, alpha: u8, is_playing: bool, palette: &[Color], spectrum: &[f32; 6], w_scale: f32, h_scale: f32, smooth_factors: (f32, f32)) {
     let (rise, fall) = smooth_factors;
-    let bar_count = 6;
-    let bar_w = 3.0 * w_scale;
-    let spacing = 2.0 * w_scale;
-    let max_h = 28.0 * h_scale;
+    let bar_count = 6; let bar_w = 3.0 * w_scale; let spacing = 2.0 * w_scale; let max_h = 28.0 * h_scale;
     VIZ_HEIGHTS.with(|h_cell| {
         let mut heights = h_cell.borrow_mut();
         for i in 0..bar_count {
             let target = if is_playing { (spectrum[i] * max_h).max(3.0 * h_scale) } else { 3.0 * h_scale };
-            if target > heights[i] {
-                heights[i] = heights[i] * (1.0 - rise) + target * rise;
-            } else {
-                heights[i] = heights[i] * (1.0 - fall) + target * fall;
-            }
+            if target > heights[i] { heights[i] = heights[i] * (1.0 - rise) + target * rise; }
+            else { heights[i] = heights[i] * (1.0 - fall) + target * fall; }
             heights[i] = heights[i].max(3.0 * h_scale);
         }
         let start_x = x - (bar_count as f32 * (bar_w + spacing)) / 2.0;
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
-        let colors_with_alpha: Vec<Color> = palette.iter()
-            .map(|c| Color::from_argb(alpha, c.r(), c.g(), c.b()))
-            .collect();
+        let mut paint = Paint::default(); paint.set_anti_alias(true);
+        let colors_with_alpha: Vec<Color> = palette.iter().map(|c| Color::from_argb(alpha, c.r(), c.g(), c.b())).collect();
         if colors_with_alpha.len() >= 2 {
-            let shader = gradient_shader::linear(
-                (Point::new(start_x, y - max_h/2.0), Point::new(start_x + (20.0 * w_scale), y + max_h/2.0)),
-                colors_with_alpha.as_slice(), None, TileMode::Mirror, None, None
-            ).unwrap();
+            let shader = gradient_shader::linear((Point::new(start_x, y - max_h/2.0), Point::new(start_x + (20.0 * w_scale), y + max_h/2.0)), colors_with_alpha.as_slice(), None, TileMode::Mirror, None, None).unwrap();
             paint.set_shader(shader);
-        } else {
-            paint.set_color(colors_with_alpha.get(0).cloned().unwrap_or(Color::WHITE));
-        }
+        } else { paint.set_color(colors_with_alpha.get(0).cloned().unwrap_or(Color::WHITE)); }
         for i in 0..bar_count {
-            let h = heights[i];
-            let rect = Rect::from_xywh(start_x + i as f32 * (bar_w + spacing), y - h / 2.0, bar_w, h);
-            let r = bar_w / 2.0;
+            let h = heights[i]; let rect = Rect::from_xywh(start_x + i as f32 * (bar_w + spacing), y - h / 2.0, bar_w, h); let r = bar_w / 2.0;
             canvas.draw_round_rect(rect, r, r, &paint);
         }
     });
@@ -247,77 +296,35 @@ fn get_palette_from_image(img: &Image, cache_key: &str) -> Vec<Color> {
         if cache_mut.len() > 50 { cache_mut.clear(); }
         if let Some(palette) = cache_mut.get(cache_key) { return palette.clone(); }
         let mut palette = Vec::new();
-        let info = skia_safe::ImageInfo::new(
-            skia_safe::ISize::new(img.width(), img.height()),
-            skia_safe::ColorType::RGBA8888,
-            skia_safe::AlphaType::Premul,
-            None,
-        );
+        let info = skia_safe::ImageInfo::new(skia_safe::ISize::new(img.width(), img.height()), skia_safe::ColorType::RGBA8888, skia_safe::AlphaType::Premul, None);
         let mut pixels = vec![0u8; (img.width() * img.height() * 4) as usize];
         if img.read_pixels(&info, &mut pixels, (img.width() * 4) as usize, (0, 0), skia_safe::image::CachingHint::Allow) {
-            let step_x = img.width() / 4;
-            let step_y = img.height() / 4;
-            let mut r_total = 0u32;
-            let mut g_total = 0u32;
-            let mut b_total = 0u32;
-            let mut count = 0u32;
-            for y in 1..4 {
-                for x in 1..4 {
-                    let idx = ((y * step_y * img.width() + x * step_x) * 4) as usize;
-                    if idx + 2 < pixels.len() {
-                        r_total += pixels[idx] as u32;
-                        g_total += pixels[idx+1] as u32;
-                        b_total += pixels[idx+2] as u32;
-                        count += 1;
-                    }
-                }
-            }
+            let step_x = img.width() / 4; let step_y = img.height() / 4;
+            let mut r_total = 0u32; let mut g_total = 0u32; let mut b_total = 0u32; let mut count = 0u32;
+            for y in 1..4 { for x in 1..4 {
+                let idx = ((y * step_y * img.width() + x * step_x) * 4) as usize;
+                if idx + 2 < pixels.len() { r_total += pixels[idx] as u32; g_total += pixels[idx+1] as u32; b_total += pixels[idx+2] as u32; count += 1; }
+            } }
             if count > 0 {
-                let r_avg = r_total as f32 / count as f32;
-                let g_avg = g_total as f32 / count as f32;
-                let b_avg = b_total as f32 / count as f32;
-
+                let r_avg = r_total as f32 / count as f32; let g_avg = g_total as f32 / count as f32; let b_avg = b_total as f32 / count as f32;
                 let brighten = |r: f32, g: f32, b: f32, factor: f32| -> Color {
-                    let mut r = r * factor;
-                    let mut g = g * factor;
-                    let mut b = b * factor;
-
+                    let mut r = r * factor; let mut g = g * factor; let mut b = b * factor;
                     let brightness = r * 0.299 + g * 0.587 + b * 0.114;
-                    if brightness < 80.0 {
-                        let boost = 80.0 - brightness;
-                        r += boost;
-                        g += boost;
-                        b += boost;
-                    }
-
-                    Color::from_rgb(
-                        r.min(255.0) as u8,
-                        g.min(255.0) as u8,
-                        b.min(255.0) as u8
-                    )
+                    if brightness < 80.0 { let boost = 80.0 - brightness; r += boost; g += boost; b += boost; }
+                    Color::from_rgb(r.min(255.0) as u8, g.min(255.0) as u8, b.min(255.0) as u8)
                 };
-
-                let primary = brighten(r_avg, g_avg, b_avg, 1.3);
-                let secondary = brighten(r_avg, g_avg, b_avg, 1.8);
-
-                palette.push(primary);
-                palette.push(secondary);
-                palette.push(primary);
+                let primary = brighten(r_avg, g_avg, b_avg, 1.3); let secondary = brighten(r_avg, g_avg, b_avg, 1.8);
+                palette.push(primary); palette.push(secondary); palette.push(primary);
             }
         }
         if palette.is_empty() { palette.push(Color::from_rgb(200, 200, 200)); }
-        cache_mut.insert(cache_key.to_string(), palette.clone());
-        palette
+        cache_mut.insert(cache_key.to_string(), palette.clone()); palette
     })
 }
 
 fn draw_placeholder(canvas: &Canvas, x: f32, y: f32, size: f32, alpha: u8, scale: f32) {
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(Color::from_argb((alpha as f32 * 0.1) as u8, 255, 255, 255));
+    let mut paint = Paint::default(); paint.set_anti_alias(true); paint.set_color(Color::from_argb((alpha as f32 * 0.1) as u8, 255, 255, 255));
     canvas.draw_round_rect(Rect::from_xywh(x, y, size, size), 14.0 * scale, 14.0 * scale, &paint);
-    
-    let cx = x + size / 2.0;
-    let cy = y + size / 2.0;
+    let cx = x + size / 2.0; let cy = y + size / 2.0;
     crate::icons::music::draw_music_icon(canvas, cx, cy, alpha, scale * 1.8);
 }

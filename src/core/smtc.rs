@@ -21,6 +21,7 @@ pub struct MediaInfo {
     pub lyrics: Option<Arc<Vec<LyricLine>>>,
     pub last_smtc_pos: u64,
     pub duration_secs: u64,
+    pub song_id: String, // Combination of title and artist
 }
 
 impl Default for MediaInfo {
@@ -37,6 +38,7 @@ impl Default for MediaInfo {
             lyrics: None,
             last_smtc_pos: 0,
             duration_secs: 0,
+            song_id: String::new(),
         }
     }
 }
@@ -70,6 +72,7 @@ pub struct SmtcListener {
     active: Arc<AtomicBool>,
     lyrics_source: Arc<Mutex<String>>,
     lyrics_fallback: Arc<Mutex<bool>>,
+    updating: Arc<AtomicBool>,
 }
 
 impl SmtcListener {
@@ -79,6 +82,7 @@ impl SmtcListener {
             active: Arc::new(AtomicBool::new(true)),
             lyrics_source: Arc::new(Mutex::new(source)),
             lyrics_fallback: Arc::new(Mutex::new(fallback)),
+            updating: Arc::new(AtomicBool::new(false)),
         };
         listener.init();
         listener
@@ -127,6 +131,8 @@ impl SmtcListener {
         let active_clone = self.active.clone();
         let source_clone = self.lyrics_source.clone();
         let fallback_clone = self.lyrics_fallback.clone();
+        let updating_clone = self.updating.clone();
+
         std::thread::spawn(move || {
             let manager = match GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
                 Ok(op) => match op.get() {
@@ -136,7 +142,8 @@ impl SmtcListener {
                 Err(_) => return,
             };
 
-            let update_info = |mgr: &GlobalSystemMediaTransportControlsSessionManager, arc: &Arc<Mutex<MediaInfo>>, src: &Arc<Mutex<String>>, fb: &Arc<Mutex<bool>>| {
+            let update_info = |mgr: &GlobalSystemMediaTransportControlsSessionManager, arc: &Arc<Mutex<MediaInfo>>, src: &Arc<Mutex<String>>, fb: &Arc<Mutex<bool>>, upd: &Arc<AtomicBool>| {
+                if upd.swap(true, Ordering::SeqCst) { return; }
                 if let Ok(session) = mgr.GetCurrentSession() {
                     let _ = Self::fetch_properties(&session, arc, src, fb);
                 } else {
@@ -146,16 +153,18 @@ impl SmtcListener {
                         }
                     }
                 }
+                upd.store(false, Ordering::SeqCst);
             };
 
-            update_info(&manager, &info_clone, &source_clone, &fallback_clone);
+            update_info(&manager, &info_clone, &source_clone, &fallback_clone, &updating_clone);
 
             let info_for_handler = info_clone.clone();
             let source_for_handler = source_clone.clone();
             let fallback_for_handler = fallback_clone.clone();
+            let updating_for_handler = updating_clone.clone();
             let handler = TypedEventHandler::new(move |m: &Option<GlobalSystemMediaTransportControlsSessionManager>, _| {
                 if let Some(mgr) = m {
-                    let _ = update_info(mgr, &info_for_handler, &source_for_handler, &fallback_for_handler);
+                    let _ = update_info(mgr, &info_for_handler, &source_for_handler, &fallback_for_handler, &updating_for_handler);
                 }
                 Ok(())
             });
@@ -165,7 +174,7 @@ impl SmtcListener {
                 if let Ok(session) = manager.GetCurrentSession() {
                     let _ = Self::fetch_properties(&session, &info_clone, &source_clone, &fallback_clone);
                 }
-                std::thread::sleep(Duration::from_millis(300));
+                std::thread::sleep(Duration::from_millis(500));
             }
         });
     }
@@ -187,14 +196,16 @@ impl SmtcListener {
 
         let new_title = props.Title()?.to_string();
         let new_artist = props.Artist()?.to_string();
+        let new_song_id = format!("{} - {}", new_title, new_artist);
         let mut should_fetch_lyrics = false;
         let mut should_fetch_thumbnail = false;
 
         if let Ok(mut info) = info_arc.lock() {
-            let song_changed = info.title != new_title || info.artist != new_artist;
+            let song_changed = info.song_id != new_song_id;
             if song_changed {
                 info.title = new_title.clone();
                 info.artist = new_artist.clone();
+                info.song_id = new_song_id.clone();
                 info.lyrics = None;
                 info.thumbnail = None;
                 info.position_ms = smtc_pos;
@@ -205,7 +216,7 @@ impl SmtcListener {
             }
 
             info.album = props.AlbumTitle()?.to_string();
-            info.duration_secs = duration_secs;
+            info.duration_secs = duration_secs; // 确保此处赋值生效
             
             let current_extrapolated = if info.is_playing {
                 info.position_ms + info.last_update.elapsed().as_millis() as u64
@@ -216,11 +227,12 @@ impl SmtcListener {
             let smtc_changed = smtc_pos != info.last_smtc_pos;
             let diff_with_extrapolated = (smtc_pos as i64 - current_extrapolated as i64).abs();
 
+            // More aggressive sync
             let should_sync = if song_changed {
                 true
             } else if info.is_playing != is_playing {
                 true
-            } else if smtc_changed && diff_with_extrapolated > 2000 {
+            } else if smtc_changed && diff_with_extrapolated > 800 {
                 true
             } else if smtc_pos > 0 && info.position_ms == 0 && is_playing {
                 true
@@ -239,6 +251,10 @@ impl SmtcListener {
 
         if should_fetch_thumbnail {
             if let Ok(thumb_ref) = props.Thumbnail() {
+                let info_arc_clone = info_arc.clone();
+                let song_id_clone = new_song_id.clone();
+                // We are already in a background thread (init loop or event handler), 
+                // so we can do some sync work here to avoid Send issues with thumb_ref.
                 if let Ok(stream_async) = thumb_ref.OpenReadAsync() {
                     if let Ok(stream) = stream_async.get() {
                         if let Ok(size) = stream.Size() {
@@ -248,8 +264,10 @@ impl SmtcListener {
                                     if let Ok(reader) = windows::Storage::Streams::DataReader::FromBuffer(&res_buffer) {
                                         let mut bytes = vec![0u8; size as usize];
                                         let _ = reader.ReadBytes(&mut bytes);
-                                        if let Ok(mut info) = info_arc.lock() {
-                                            info.thumbnail = Some(Arc::new(bytes));
+                                        if let Ok(mut info) = info_arc_clone.lock() {
+                                            if info.song_id == song_id_clone {
+                                                info.thumbnail = Some(Arc::new(bytes));
+                                            }
                                         }
                                     }
                                 }
@@ -264,12 +282,13 @@ impl SmtcListener {
             let arc_clone = info_arc.clone();
             let source_arc_clone = source.clone();
             let fallback_arc_clone = fallback.clone();
+            let song_id_for_lyrics = new_song_id.clone();
             std::thread::spawn(move || {
                 let src = source_arc_clone.lock().unwrap().clone();
                 let fb = *fallback_arc_clone.lock().unwrap();
                 if let Some(lyrics) = fetch_lyrics(&new_title, &new_artist, duration_secs, &src, fb) {
                     if let Ok(mut info) = arc_clone.lock() {
-                        if info.title == new_title && info.artist == new_artist {
+                        if info.song_id == song_id_for_lyrics {
                             info.lyrics = Some(lyrics);
                         }
                     }
